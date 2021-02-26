@@ -280,3 +280,213 @@ class EventSerializer(serializers.Serializer):
         ]
 ```
 
+
+
+### Accessing the initial data and instance
+
+serializer 인스턴스에 초기화 된 객체나 쿼리셋을 보낼 때, `.instance` 프로퍼티로 객체에 접근이 가능하다. 만약 초기화되지 않은 객체가 보내질 때는 `.instance` 프로퍼티는 `None`이 된다.
+
+serializer 인스턴스에 데이터를 보낼 때, 수정이 되지 않은 원본 데이터는 `.initial_data` 프로퍼티로 접근이 가능하다. `data` 키워드 인자를 받지 않았을 경우, `.initial_data` 프로퍼티는 존재하지 않는다.
+
+
+
+### Partial Updates
+
+기본적으로 serializer에는 모든 필드의 값을 보내야하며, 그렇지 않으면 validation errors가 발생한다. 데이터를 부분적으로 보내 수정할 경우에는 `partial` 인자의 값을 `True`로 넘겨줘야한다.
+
+```python
+serializer = CommentSerializer(comment, data={'content': 'foo bar'}, partial=True)
+```
+
+
+
+### Dealing with nested objects
+
+이전의 예들은 단순한 데이터 타입을 다루는데는 괜찮지만, 객체의 인자가 단순한 데이터 타입이 아닌 문자열, 날짜, 정수와 같은 복잡한 데이터 타입을 다뤄야하는 경우가 있을 수 있다.
+
+이런 경우에는 `serializer` 클래스는 자체적으로 `field`의 타입을 가지며, 이를 통해 내장된 객체들을 다룰 수 있다.
+
+```python
+class UserSerializer(serializers.Serializer):
+    email = serializers.EmailField()
+    username = serializers.CharField(max_length=100)
+
+class CommentSerializer(serializers.Serializer):
+    user = UserSerializer()
+    content = serializers.CharField(max_length=200)
+    created = serializers.DateTimeField()
+```
+
+필드로써 사용되는 serializer가 `None` 값을 가질 수 있으면 `required=False`, 아이템 리스트를 가질 때는 `many=True` 플래그를 인자로 넣어줘야 한다.
+
+```python
+class CommentSerializer(serializers.Serializer):
+    user = UserSerializer(required=False)
+    edits = EditItemSerializer(many=True)
+    content = serializers.CharField(max_length=200)
+    created = serializers.DateTimeField()
+```
+
+
+
+### Writable nested representations
+
+내장된 객체를 포함하는 데이터에 대한 역직렬화 데이터를 다룰 때, 내장된 객체의 값에 문제가 있으면 에러가 발생한다. 이는 앞에서 다루었던 `.validated_data` 프로퍼티를 내장된 객체도 가진다는 것을 의미한다.
+
+
+
+##### writing `.create()` methods for nested representations
+
+내장된 객체를 다룬 뒤에 인스턴스를 생성하고 싶을 때, `.create()`나 `.update()` 메서드를 오버라이딩하면 된다.
+
+```python
+class UserSerializer(serializers.ModelSerializer):
+    profile = ProfileSerializer()
+
+    class Meta:
+        model = User
+        fields = ['username', 'email', 'profile']
+
+    def create(self, validated_data):
+        profile_data = validated_data.pop('profile')
+        user = User.objects.create(**validated_data) # 유저 인스턴스를 생성하고
+        Profile.objects.create(user=user, **profile_data) # 유저 인스턴스의 프로파일 내장 객체를 생성한다.
+        return user # 반환값은 프로파일 내장 객체를 가지는 유저 인스턴스다.
+```
+
+
+
+##### writing `.update()` methods for nested representations
+
+만약 데이터 간의 관계가 `None`이거나 제공되지 않았다면, 어떻게 처리해야할까?
+
+- 데이터베이스에서의 관계를 `NULL`로 설정
+- 연관된 인스턴스를 제거
+- 데이터를 무시하고 인스턴스를 그대로 둠
+- 검증 에러를 발생
+
+앞에서 사용한 `UserSerializer` 클래스에 예시를 참고하자.
+
+```python
+def update(self, instance, validated_data):
+        profile = instance.profile
+
+        instance.username = validated_data.get('username', instance.username)
+        instance.email = validated_data.get('email', instance.email)
+        instance.save()
+
+        profile.is_premium_member = profile_data.get(
+            'is_premium_member',
+            profile.is_premium_member
+        )
+        profile.has_support_contract = profile_data.get(
+            'has_support_contract',
+            profile.has_support_contract
+         )
+        profile.save()
+
+        return instance
+```
+
+내장된 객체에 대한 생성과 업데이트 액션이 애매모호하기 때문에, 이러한 복잡한 모델 관계를 다룰 때 DRF는 명시적으로 사용할 메서드를 요구한다. 내장된 객체를 작성하는데 `ModelSerializer.create()`와 `ModelSerializer.update()`를 기본적으로 지원하지 않기 때문이다.
+
+이러한 경우를 다루기 위해 DRF의 써드 파티 패키지가 존재하니 해당 패키지를 사용하도록 하자.
+
+
+
+### Model Serializer
+
+`ModelSerializer` 클래스는 모델 필드에 상응하는 `serializer` 클래스를 즉시 생성해준다.
+
+**`ModelSerializer` 클래스는 일반 `serializer` 클래스와 유사하지만, 다음과 같은 점에서 차이를 가진다.**
+
+- 모델을 기반으로 필드를 자동으로 생성해준다.
+- unique_together validators와 같은 serializer의 validator을 자동으로 생성해준다.
+- 기본적으로 `.create()`와 `.update()` 메서드를 적용할 수 있다.
+
+`ModelSerializer`는 다음과 같이 선언한다.
+
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+```
+
+기본적으로 모델 클래스의 필드는 serializer의 필드에 매핑된다. 외래키의 경우에는 `PrimaryKeyRelatedField`를 통해 따로 지정해주어야 하는데, 이는 serializer에서 명시적으로 특정하지 않은 이상 기본적으로 역 관계를 성립시키지 않기 때문이다.
+
+
+
+##### inspecting a `ModelSerializer`
+
+`ModelSerializer`의 `__repr__` 특별 메서드는 `ModelSerializer`의 개요를 보여준다. 따라서, `repr()` 내장 함수를 통해 `ModelSerializer`의 형태를 쉽게 파악할 수 있다.
+
+
+
+### Specifying which fields to include
+
+모델의 기본 필드들 중 일부만을 사용하고 싶을 경우, `fields`와 `exclude` 옵션을 통해 장고의 `Form`과 마찬가지로 필드들을 특정할 수 있다. 보통 `fields`를 통해 사용할 필드의 셋을 명시적으로 지정하는 것을 권장한다.
+
+또한, `fields`의 값을 `'__all__'`로 설정하면 모든 필드를 사용할 것임을 명시적으로 보여줄 수 있다.
+
+`exclude`는 필드 중에서 제외할 필드를 설정할 수 있다.
+
+
+
+### Specifying nested serialization
+
+기본적으로 `ModelSerializer`는 관계 정의를 위해 Primary key를 사용하지만, `depth` 옵션을 설정하여 쉽게 nested representations를 생성할 수 있다.
+
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+        depth = 1
+```
+
+`depth` 옵션은 정수 값으로 지정되어야 한다.
+
+
+
+### Sepcifying fields explicity
+
+`ModelSerializer`에 추가적인 필드를 생성하거나 `serializer`에 정의된 필드를 활용하여 클래스에 선언된 기본 필드를 오버라이딩할 수 있다.
+
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    url = serializers.CharField(source='get_absolute_url', read_only=True)
+    groups = serializers.PrimaryKeyRelatedField(many=True)
+
+    class Meta:
+        model = Account
+```
+
+
+
+### Specifying read only fields
+
+다중의 필드를 읽기 전용으로 사용하고 싶은 경우가 있을 것이다. 이 경우에는 명시적으로 `read_only=True` 인자를 설정하거나, `Meta` 옵션에 `read_only_fields`를 정의하면 된다.
+
+```python
+class AccountSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Account
+        fields = ['id', 'account_name', 'users', 'created']
+        read_only_fields = ['account_name']
+```
+
+`editable=False`로 설정된 필드나 `AutoField`는 기본적으로 읽기 전용이다. 따라서, `read_only_fields`와 같은 옵션을 적용시키지 않아도 된다.
+
+모델 단계에서 `unique_together` 제약의 일부에 해당하는 읽기 전용 필드와 같은 특수 케이스가 있다. 이는 필드는 serializer에 정의된 제약 검증 단계를 거치지만, 유저에 의한 수정은 불가능한 경우다.
+
+이러한 경우를 올바르게 다루는 방법으로 serializer에 있는 해당 필드를 명시적으로 `read_only=True`와 `default=...` 키워드 인자를 설정해주면 된다.
+
+```python
+user = serializers.PrimaryKeyRelatedField(read_only=True, default=serializers.CurrentUserDefault())
+```
+
+
+
+### Additional keyword arguments
+

@@ -224,4 +224,4 @@ Note that the `detail`, `basename`, and `suffix` arguments are reserved for view
 
 ### Advance custom routers
 
-만약에 모든 라우트를 직접 커스텀하고 싶다면 `BaseRouter` 클래스와 `get_urls(self)` 메서드를 오버라이딩하면 된다. 이 메서드는 등록된 viewsets을 탐색하여 URL pattern을 반환한다. 등록된 접두사, viewset, 기본명 튜플은 `self.registery` 인자로 접근이 가능하다.
+만약에 모든 라우트를 직접 커스텀하고 싶다면 `BaseRouter` 클래스와 `get_urls(self)` 메서드를 오버라이딩하면 된다. 이 메서드는 등록된 viewsets을 탐색하여 URL pattern을 반환한다. 등록된 접두사, viewset, 기본명 튜플은 `self.registry` 인자로 접근이 가능하다.
