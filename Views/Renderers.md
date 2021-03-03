@@ -276,3 +276,100 @@ class PlainTextRenderer(renderers.BaseRenderer):
         return data.encode(self.charset)
 ```
 
+만약 렌더러 클래스가 유니코드 문자열을 반환한다면, 응답 컨텐츠는 `Response` 클래스에 의해 렌더러 클래스에서 인코딩하기로 설정한 `charset` 인자 설정을 활용하여 bytestring으로 강제변환됩니다.
+
+만약 렌더러 클래스가 순수 이진 컨텐츠를 bytestring으로 반환한다면, `charset`을 `None`으로 설정하여 응답의 `Content-Type` 헤더가 `charset` 설정 값을 가지지 못하게 해야합니다.
+
+`render_style` 인자의 값을 `'binary'`로 설정하고 싶을 때가 있을겁니다. 그렇게 함으로써 브라우저 API는 이진 컨텐츠를 문자열로 보여주지 않게 됩니다.
+
+```python
+class JPEGRenderer(renderers.BaseRenderer):
+    media_type = 'image/jpeg'
+    format = 'jpg'
+    charset = None
+    render_style = 'binary'
+
+    def render(self, data, media_type=None, renderer_context=None):
+        return data
+```
+
+
+
+### Advanced renderer usage
+
+DRF의 렌더러 클래스를 활용하면 몇가지 유연한 트릭이 가능하다.
+
+- 요청 미디어 타입에 따라 동일한 엔드포인트로부터 일반 또는 내장형 표현식을 모두 제공할 수 있습니다.
+- 동일한 엔드포인트로 JSON 기반의 API 응답과 HTML 웹페이지 응답 모두 가능합니다.
+- 클라이언트가 사용하는 API의 표현식의 타입들을 특정할 수 있습니다.
+- 렌더러의 미디어 타입을 `media_type='image/*'` 임의로 특정짓고 싶다면 `Accept` 헤더를 사용하여 응답의 인코딩 방법을 다양하게 사용할 수 있습니다.
+
+
+
+**Varying behaviour by media type**
+
+경우에 따라 미디어 타입에 따라 다른 직렬화 스타일을 뷰에 적용시키고 싶을 때가 있을 것입니다. 그렇게 할 필요가 있다면 `request.accepted_renderer`로 응답에 사용할 렌더러를 결정하면 됩니다.
+
+```python
+@api_view(['GET'])
+@renderer_classes([TemplateHTMLRenderer, JSONRenderer])
+def list_users(request):
+    """
+    JSON과 HTML 표현식을 가지는 뷰
+    """
+    queryset = Users.objects.filter(active=True)
+
+    if request.accepted_renderer.format == 'html':
+        # TemplateHTMLRenderer는 딕셔너리형 컨텍스트를 받고,
+        # 추가적으로 'template_name' 값을 받는다..
+        # 직렬화 과정을 필요로 하지 않는다.
+        data = {'users': queryset}
+        return Response(data, template_name='list_users.html')
+
+    # JSONRenderer는 직렬화 과정이 필요하다.
+    serializer = UserSerializer(instance=queryset)
+    data = serializer.data
+    return Response(data)
+```
+
+
+
+**Underspecifying the media type**
+
+경우에 따라 어떤 미디어 타입의 범위를 다루는 렌더러를 사용하고 싶을 때가 있을 것이다. 이 경우에는 `media_type=image/*` 또는 `media_type = */*`와 같이 설정하면 된다.
+
+단, 미디어 타입을 정확하게 특정하지 않은 경우에는 응답 객체에 `content_type`을 명시적으로 설정해줘야 한다.
+
+```python
+return Response(data, content_type='image/png')
+```
+
+
+
+**Designing your media types**
+
+웹 API로 사용할 목적이라면, 하이퍼링크 관계를 가지는 `JSON` 응답만으로도 충분할 것이다. 만약 완전히 RESTful한 디자인을 원한다면 미디어 타입의 디자인과 사용과 관련하여 세부적인 설정을 고려할 필요가 있다.
+
+Roy Fielding의 말에 의하면,
+
+```
+"A REST API should spend almost all of its descriptive effort in defining the media type(s) used for representing resources and driving application state, or in defining extended relation names and/or hypertext-enabled mark-up for existing standard media types."
+
+"REST API는 현존하는 기준 미디어 타입을 위한 확장된 관계명 또는 하이퍼텍스트한 마크업을 정의하거나 애플리케이션의 상태와 자원표시에 사용할 미디어 타입을 정의하는데 대부분의 노력을 쏟아부어야 한다."
+```
+
+
+
+**HTML error views**
+
+일반적으로 렌더러는 `APIException`의 서브클래스나 `Http404` 또는 `PermissionDenied`와 같은 응답 예외나 일반 응답에 상관없이 행동한다.
+
+`TemplateHTMLRenderer` 또는 `StaticHTMLRenderer`를 사용할 때는 예외가 발생했을 때 조금 다른 방식으로 행동하며, [장고의 기본 에러 뷰 처리 방식](https://docs.djangoproject.com/en/stable/topics/http/views/#customizing-error-views)을 따른다.
+
+HTML 렌더러는 발생한 예외를 다음과 같은 순서로, 다음 중 하나의 방법으로 처리한다.
+
+- `{static_code}.html` 템플릿을 불러오고 렌더링한다.
+- `api_exception.html` 템플릿을 불러오고 렌더링한다.
+- HTTP 상태 코드와 문자를 렌더링한다. `404 Not Found`
+
+템플릿은 `status_code`와 `details` 키를 포함하는 `RequestContext`를 렌더링한다. 
