@@ -490,3 +490,37 @@ user = serializers.PrimaryKeyRelatedField(read_only=True, default=serializers.Cu
 
 ### Additional keyword arguments
 
+`extra_kwargs` 옵션을 사용하여 임의의 키워드 인자를 필드에 추가시킬 수 있는 방법이 있다. 여기서 `read_only_fields`의 경우, serializer에 명시적으로 필드를 선언할 필요가 없다.
+
+```python
+class CreateUserSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = User
+        fields = ['email', 'username', 'password']
+        extra_kwargs = {'password': {'write_only': True}}
+
+    def create(self, validated_data):
+        user = User(
+            email=validated_data['email'],
+            username=validated_data['username']
+        )
+        user.set_password(validated_data['password'])
+        user.save()
+        return user
+```
+
+여기서 명심해야할 것은 serializer 클래스에 이미 명시적으로 선언된 필드라면 `extra_kwargs` 옵션은 무시된다는 것이다.
+
+
+
+### Relational fields
+
+모델 인스턴스들을 직렬화할 때, 모델 인스턴스 간의 관계를 표현하는 몇가지 다른 방법이 있다. `ModelSerializer`의 기본 표현식은 관계가 있는 인스턴스들의 `primary key`를 사용하는 것이다.
+
+다른 대체 방법으로는 하이퍼링크를 이용한 직렬화, 완전한 내장 표현식을 이용한 직렬화, 또는 커스텀 표현식을 이용한 직렬화가 있다.
+
+
+
+### Customizing field mappings
+
+`ModelSerializer` 클래스는 serializer 초기화 과정에서 자동으로 결정된 필드를 대체하기 위해 오버라이딩이 가능한 API를 가진다. 만약 `ModelSerializer`에 의해 자동으로 필드가 생성되는 것을 원치 않는다면 클래스에 명시적으로 정의하든가, 아니면 기존의 `Serializer` 클래스를 사용하면 된다.
